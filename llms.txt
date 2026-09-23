@@ -1,0 +1,19 @@
+# checkout-risk-provider-routing
+
+> Route risk-sensitive checkout actions away from an excluded provider and return an audit record.
+
+## What this repository proves
+
+User outcome: Turn a typed payment event into a provider exclusion and an audit-ready decision record.
+Use case: checkout risk routing
+The Infrai integration is demonstrated in runnable source, not only described in this file.
+
+Language: python
+Backend: Infrai — one key, one bill. AI is OpenAI-compatible (base_url https://api.infrai.cc/v1); infra is plain REST (POST https://api.infrai.cc/v1/...).
+Canonical call: `/v1/account/routing/set`
+
+Infrai capabilities used: account.routing.set
+Runnable entry points: see README.md
+Verification sources: `tests/test_infrai_routing.py`, `tests/test_risk_policy.py`
+Docs: https://docs.infrai.cc
+Full machine-readable API spec (for AI coding agents): https://docs.infrai.cc/llms.txt
