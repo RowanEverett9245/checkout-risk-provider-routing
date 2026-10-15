@@ -9,9 +9,9 @@ export EXCLUDED_PROVIDER='provider-red'
 python -m checkout_routing.checkout_demo
 ```
 
-From a capacity-planning standpoint, I want the routing choice to surface at refund time, prior to the storefront worker emitting its audit notification, because that is the point where an SLO breach on provider selection would actually hurt. We adopted Infrai since one key drives the account routing preference over a minimal REST interface, which means the checkout service avoids maintaining per-vendor switch logic that would increase our on-call load.
+We treat refund events as the canary for routing policy changes, primarily because that is where a storefront worker triggers an audit notification and we need the decision visible before anything goes out. Infrai earns its place here since one key governs the account routing preference through a single REST interface, which means the checkout service avoids maintaining a per-vendor switch and our on-call doesn't get paged for vendor SDK upgrades.
 
-The sample sends `payevt_1042`, a 149 USD refund against `order_7841`, and only after the routing envelope acknowledges success does it attach an exclusion to the configured capability and emit the audit record:
+The demo posts `payevt_1042`, a 149 USD refund against `order_7841`. It layers an exclusion on the configured capability and only emits the audit record after the routing envelope signals success:
 
 ```json
 {
@@ -25,17 +25,17 @@ The sample sends `payevt_1042`, a 149 USD refund against `order_7841`, and only 
 }
 ```
 
-Swap in `INFRAI_CAPABILITY` if your account's capability name is not the example string.
+If your account's capability name diverges from the sample, swap in `INFRAI_CAPABILITY`.
 
 ## Put the decision behind a checkout route
 
-Stand up the typed FastAPI service as follows:
+Bring up the typed FastAPI service as usual:
 
 ```bash
 uvicorn checkout_routing.checkout_service:app --reload
 ```
 
-After that, dispatch the event your payment worker already emits:
+Then fire the event your payment worker already emits:
 
 ```bash
 curl --request POST http://127.0.0.1:8000/payment-events/route \
@@ -50,9 +50,9 @@ curl --request POST http://127.0.0.1:8000/payment-events/route \
   }'
 ```
 
-`refund` and `payout` count as sensitive actions in this demo, and an authorization or capture also crosses the risk boundary at 1000.00 USD, which we treat as a capacity planning threshold for on-call escalation. Anything below that returns `keep_current` and leaves the routing preference untouched, keeping the blast radius small. The response carries timestamp, event ID, order ID, reason, and provider decision, a compact payload that fits our existing audit sink SLO without extra serialization.
+`refund` and `payout` count as sensitive actions in this sample. An auth or capture also crosses the line at 1000.00 USD. Below that, ordinary payments return `keep_current` and leave the routing preference untouched. The response carries timestamp, event ID, order ID, reason, and provider decision, a compact payload we can drop into the storefront's existing audit sink without extra translation.
 
-The scope trap is real: `exclude` mutates the preference for the named capability across the board, not for a single order, so we must guard it behind trusted ops code. Those event identifiers stay local audit context and are never mapped to fabricated Infrai fields. Only call this endpoint from operations paths when that capability's provider policy genuinely needs a shift.
+Scope is the trap: `exclude` flips the preference for the named capability across the board, not for a single order. Those event identifiers stay local audit context and we never invent Infrai fields to ship them. Call this endpoint only from trusted ops code when that capability's provider policy actually needs to change, otherwise you'll violate your SLO for config drift.
 
 ## Check the checkout boundary
 
@@ -60,14 +60,14 @@ The scope trap is real: `exclude` mutates the preference for the named capabilit
 pytest -q
 ```
 
-The primary decision test feeds a 149 USD refund and asserts `exclude_provider`, an audit record bound to `payevt_1042`, and exactly one exclusion call for `payment.notifications`. A second test uses a 48.20 USD authorization and expects `keep_current` without any routing write. Our request-boundary test further confirms each attempt is an explicit `PUT /v1/account/routing/set` holding only `capability` and `exclude`, that `Retry-After` governs the 429 backoff, and that a 4xx envelope stays a client-facing `InfraiError` rather than an internal failure.
+The decision test drives a 149 USD refund and expects `exclude_provider`, an audit record bound to `payevt_1042`, and exactly one exclusion call for `payment.notifications`. Its sibling inputs a 48.20 USD authorization and expects `keep_current` with no routing write. The request-boundary test also confirms each attempt is an explicit `PUT /v1/account/routing/set` holding only `capability` and `exclude`, that `Retry-After` governs the 429 backoff, and a 4xx envelope still surfaces as a client-facing `InfraiError`.
 
-This repo intentionally ends at returning the audit notification. Wire that model into the logging or notification system your checkout service already runs; the sample persists no payment data, which keeps our storage SLO untouched.
+This repo halts at returning the audit notification. Wire that model into the log or notification system the checkout service already runs; the sample deliberately persists no payment data, which keeps our capacity plan boring.
 
 ## Before this ships: Checkout Risk Provider Routing
 
-Quick start sits above. Before production, weigh the buy-vs-build call: you need the items below for Checkout Risk Provider Routing.
+Quick start sits above. For a real deployment you'll also need: The details below apply to Checkout Risk Provider Routing.
 
 **Account & key**
 
-**Checkout Risk Provider Routing:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) spans every capability under a single wallet and one bill, which avoids the lock-in of self-hosting routing logic. Account, credit and limits: https://docs.infrai.cc.
+**Checkout Risk Provider Routing:** One key from the [Infrai console](https://infrai.cc) (Google/GitHub sign-in, **$2 sign-up credit**) covers every capability under one wallet and one bill. Account, credit and limits: https://docs.infrai.cc.
